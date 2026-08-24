@@ -11,6 +11,8 @@ import { ProductDetails } from './components/views/ProductDetails';
 import { ReviewAnalysis } from './components/views/ReviewAnalysis';
 import { AnalyticsPage } from './components/views/AnalyticsPage';
 import { SettingsPage } from './components/views/SettingsPage';
+import { WebhooksPage } from './components/views/WebhooksPage';
+import { ReportsPage } from './components/views/ReportsPage';
 
 // Dashboard Views
 import { UserDashboard } from './components/dashboards/UserDashboard';
@@ -35,6 +37,10 @@ export function App() {
         return <AnalyticsPage />;
       case 'settings':
         return <SettingsPage />;
+      case 'webhooks':
+        return <WebhooksPage />;
+      case 'reports':
+        return <ReportsPage />;
       case 'user-dashboard':
         return <UserDashboard />;
       case 'seller-dashboard':
@@ -61,3 +67,4 @@ export function App() {
     </div>
   );
 }
+

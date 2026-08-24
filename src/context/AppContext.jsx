@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { INITIAL_PRODUCTS, INITIAL_REVIEWS, RECENT_ALERTS, SYSTEM_STATS } from '../services/mockData';
 import { analyzeReviewNLP } from '../services/nlpLocalEngine';
+import { apiService } from '../services/apiService';
 
 const AppContext = createContext();
 
@@ -16,6 +17,29 @@ export const AppProvider = ({ children }) => {
   const [notificationCount, setNotificationCount] = useState(3);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
+  // Load live data from Express backend on mount
+  useEffect(() => {
+    async function loadBackendData() {
+      const [fetchedProducts, fetchedReviews, fetchedStats] = await Promise.all([
+        apiService.getProducts(),
+        apiService.getReviews(),
+        apiService.getAnalyticsSummary()
+      ]);
+
+      if (fetchedProducts && fetchedProducts.length > 0) {
+        setProducts(fetchedProducts);
+        setSelectedProduct(fetchedProducts[0]);
+      }
+      if (fetchedReviews && fetchedReviews.length > 0) {
+        setReviews(fetchedReviews);
+      }
+      if (fetchedStats) {
+        setStats(fetchedStats);
+      }
+    }
+    loadBackendData();
+  }, []);
+
   const toggleSidebar = () => setIsSidebarOpen(prev => !prev);
   const closeSidebar = () => setIsSidebarOpen(false);
 
@@ -25,56 +49,80 @@ export const AppProvider = ({ children }) => {
     setIsSidebarOpen(false);
   };
 
-  // Submit new review and analyze automatically
-  const submitReview = (reviewData) => {
-    const analysis = analyzeReviewNLP({
+  // Submit new review and analyze automatically via backend API
+  const submitReview = async (reviewData) => {
+    const payload = {
       text: reviewData.text,
       rating: reviewData.rating,
       verified: reviewData.verified,
       accountAgeDays: reviewData.accountAgeDays || 30,
-      reviewVelocity: reviewData.reviewVelocity || 1
-    });
-
-    const newRev = {
-      id: `rev-${Date.now()}`,
-      productId: reviewData.productId || selectedProduct.id,
-      productName: reviewData.productName || selectedProduct.name,
-      reviewerName: reviewData.reviewerName || 'Anonymous Buyer',
-      reviewerId: reviewData.reviewerId || 'usr-temp',
-      rating: reviewData.rating,
-      title: reviewData.title || 'Product Review',
-      text: reviewData.text,
-      date: new Date().toISOString(),
-      verified: reviewData.verified,
-      accountAgeDays: reviewData.accountAgeDays || 30,
-      reviewVelocityCount: reviewData.reviewVelocity || 1,
-      ipSubnet: '192.168.1.XX',
-      ...analysis,
-      status: analysis.isFake ? 'FLAGGED' : 'APPROVED'
+      reviewVelocity: reviewData.reviewVelocity || 1,
+      productId: reviewData.productId || selectedProduct.id
     };
 
-    setReviews(prev => [newRev, ...prev]);
+    const apiResponse = await apiService.analyzeReview(payload);
 
-    if (analysis.isFake) {
-      setStats(prev => ({
-        ...prev,
-        totalReviewsAnalyzed: prev.totalReviewsAnalyzed + 1,
-        fakeReviewsDetected: prev.fakeReviewsDetected + 1,
-        fraudAlerts24h: prev.fraudAlerts24h + 1
-      }));
+    let newRev;
+    if (apiResponse && apiResponse.success && apiResponse.review) {
+      newRev = apiResponse.review;
+      setReviews(prev => [newRev, ...prev]);
+
+      const updatedStats = await apiService.getAnalyticsSummary();
+      if (updatedStats) {
+        setStats(updatedStats);
+      }
     } else {
-      setStats(prev => ({
-        ...prev,
-        totalReviewsAnalyzed: prev.totalReviewsAnalyzed + 1,
-        genuineReviews: prev.genuineReviews + 1
-      }));
+      // Local fallback if API server is offline
+      const analysis = analyzeReviewNLP({
+        text: reviewData.text,
+        rating: reviewData.rating,
+        verified: reviewData.verified,
+        accountAgeDays: reviewData.accountAgeDays || 30,
+        reviewVelocity: reviewData.reviewVelocity || 1
+      });
+
+      newRev = {
+        id: `rev-${Date.now()}`,
+        productId: reviewData.productId || selectedProduct.id,
+        productName: reviewData.productName || selectedProduct.name,
+        reviewerName: reviewData.reviewerName || 'Anonymous Buyer',
+        reviewerId: reviewData.reviewerId || 'usr-temp',
+        rating: reviewData.rating,
+        title: reviewData.title || 'Product Review',
+        text: reviewData.text,
+        date: new Date().toISOString(),
+        verified: reviewData.verified,
+        accountAgeDays: reviewData.accountAgeDays || 30,
+        reviewVelocityCount: reviewData.reviewVelocity || 1,
+        ipSubnet: '192.168.1.XX',
+        ...analysis,
+        status: analysis.isFake ? 'FLAGGED' : 'APPROVED'
+      };
+
+      setReviews(prev => [newRev, ...prev]);
+
+      if (analysis.isFake) {
+        setStats(prev => ({
+          ...prev,
+          totalReviewsAnalyzed: prev.totalReviewsAnalyzed + 1,
+          fakeReviewsDetected: prev.fakeReviewsDetected + 1,
+          fraudAlerts24h: prev.fraudAlerts24h + 1
+        }));
+      } else {
+        setStats(prev => ({
+          ...prev,
+          totalReviewsAnalyzed: prev.totalReviewsAnalyzed + 1,
+          genuineReviews: prev.genuineReviews + 1
+        }));
+      }
     }
 
     return newRev;
   };
 
-  const updateReviewStatus = (reviewId, newStatus) => {
+  const updateReviewStatus = async (reviewId, newStatus) => {
     setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, status: newStatus } : r));
+    await apiService.updateReviewStatus(reviewId, newStatus);
   };
 
   return (
@@ -107,3 +155,4 @@ export const AppProvider = ({ children }) => {
 };
 
 export const useApp = () => useContext(AppContext);
+
